@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>SQUARE算法运行</title>
+  <!-- 引入 Bootstrap CSS -->
+  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+  <!-- 引入 Chart.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body {
+      background-color: #f8f9fa;
+    }
+    .container {
+      margin-top: 20px;
+    }
+    #result {
+      height: 300px;
+      overflow-y: auto;
+      background: #ffffff;
+      padding: 10px;
+      white-space: pre-wrap;
+      font-family: monospace;
+      border: 1px solid #dee2e6;
+      border-radius: 0.25rem;
+    }
+    #evaluation_results {
+      background: #ffffff;
+      padding: 20px;
+      white-space: pre-wrap;
+      font-family: sans-serif;
+      border: 1px solid #dee2e6;
+      border-radius: 0.25rem;
+      margin-bottom: 20px;
+      display: none; /* 默认隐藏 */
+    }
+    #chart_container {
+      display: none; /* 默认隐藏 */
+    }
+    #chart_container canvas {
+      background: #ffffff;
+      border: 1px solid #dee2e6;
+      border-radius: 0.25rem;
+      margin-bottom: 20px;
+    }
+  </style>
+  <script>
+    document.addEventListener("DOMContentLoaded", function(){
+      const estimationSelect = document.getElementById('estimation');
+      const nfoldContainer = document.getElementById('nfold_container');
+      
+      // 页面加载时根据初始值控制 nfold 显示或隐藏
+      if(estimationSelect.value === 'unsupervised'){
+         nfoldContainer.style.display = 'none';
+      } else {
+         nfoldContainer.style.display = 'block';
+      }
+      
+      // 监听估计方法的变化
+      estimationSelect.addEventListener('change', function(){
+         if(this.value === 'unsupervised'){
+            nfoldContainer.style.display = 'none';
+         } else {
+            nfoldContainer.style.display = 'block';
+         }
+      });
+    });
+    
+    function runAlgorithm() {
+      // 获取下拉菜单选中的值
+      const estimation = document.getElementById('estimation').value;
+      const dataset = document.getElementById('dataset').value;
+      let nfold = null;
+      // 当估计方法不是 unsupervised 时，才获取 nfold 参数
+      if(estimation !== 'unsupervised'){
+         nfold = parseInt(document.getElementById('nfold').value);
+      }
+      
+      // 构造请求数据，若 nfold 为 null，则不传递该参数
+      const data = {
+        estimation: estimation,
+        dataset: dataset,
+      };
+      if(nfold !== null) {
+         data.nfold = nfold;
+      }
+      
+      // 清空日志区域
+      document.getElementById('result').textContent = "";
+      // 隐藏评估结果和图表区域（以防之前显示过）
+      document.getElementById('evaluation_results').style.display = 'none';
+      document.getElementById('chart_container').style.display = 'none';
+      
+      // 发送 POST 请求启动 Java 程序（启动后端 SSE 流输出日志）
+      fetch('/run_java_algorithm_stream', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+      }).then(response => {
+        // 使用 EventSource 监听 SSE 数据
+        const eventSource = new EventSource('/run_java_algorithm_stream');
+        eventSource.onmessage = function(e) {
+          const resultElem = document.getElementById('result');
+          resultElem.textContent += e.data + "\n";
+          // 自动滚动到底部
+          resultElem.scrollTop = resultElem.scrollHeight;
+          // 检测到运行结束标记后，关闭 SSE，并调用获取评估结果的接口
+          if (e.data.includes("Process finished with return code")) {
+            alert("运行完成！");
+            eventSource.close();
+            document.getElementById('evaluation_results_card').style.display = 'block';
+            document.getElementById('chart_card').style.display = 'block';
+
+            getEvaluationResults(data);
+          }
+        };
+        eventSource.onerror = function(e) {
+          console.error("EventSource 发生错误", e);
+          eventSource.close();
+        };
+      }).catch(error => {
+        console.error('请求失败:', error);
+      });
+    }
+    
+    // 获取评估结果，并展示表格和图表
+    function getEvaluationResults(params) {
+      fetch('/get_evaluation_results', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(params)
+      })
+      .then(response => response.json())
+      .then(result => {
+         displayEvaluationResults(result.results);
+         drawCharts(result.results);
+      })
+      .catch(error => {
+         console.error("获取评估结果失败:", error);
+      });
+    }
+    
+    // 根据 JSON 数据生成优化后的表格
+    function displayEvaluationResults(results) {
+      let container = document.getElementById('evaluation_results');
+      container.innerHTML = ''; // 清空之前的内容
+
+      results.forEach(result => {
+        // 创建一个区域用于显示当前评分方法的结果
+        let section = document.createElement('div');
+        section.className = "mb-4";
+        
+        // 标题：直接显示 result.method
+        let methodTitle = document.createElement('h4');
+        methodTitle.textContent = "评分方法：" + result.method;
+        section.appendChild(methodTitle);
+
+        // 创建表格
+        let table = document.createElement('table');
+        table.className = "table table-bordered table-striped";
+        
+        // 处理 header：只使用第一行的 header，并去掉 "%" 前缀
+        if(result.headers && result.headers.length > 0) {
+          let headerCells = result.headers[0].split('\t');
+          headerCells = headerCells.map(cell => cell.startsWith('%') ? cell.substring(1) : cell);
+          let trHeader = document.createElement('tr');
+          headerCells.forEach(cellText => {
+            let th = document.createElement('th');
+            th.textContent = cellText;
+            th.className = "p-2";
+            trHeader.appendChild(th);
+          });
+          table.appendChild(trHeader);
+        }
+
+        // 处理数据行
+        result.data.forEach(dataLine => {
+          let cells = dataLine.split('\t');
+          // 如果数据超过4个，则将前4个显示在一行，后4个显示在下一行
+          if(cells.length > 4) {
+            let tr1 = document.createElement('tr');
+            cells.slice(0, 4).forEach(cellText => {
+              let td = document.createElement('td');
+              td.textContent = cellText;
+              td.className = "p-2";
+              tr1.appendChild(td);
+            });
+            table.appendChild(tr1);
+            let tr2 = document.createElement('tr');
+            cells.slice(4).forEach(cellText => {
+              let td = document.createElement('td');
+              td.textContent = cellText;
+              td.className = "p-2";
+              tr2.appendChild(td);
+            });
+            table.appendChild(tr2);
+          } else {
+            let tr = document.createElement('tr');
+            cells.forEach(cellText => {
+              let td = document.createElement('td');
+              td.textContent = cellText;
+              td.className = "p-2";
+              tr.appendChild(td);
+            });
+            table.appendChild(tr);
+          }
+        });
+
+        section.appendChild(table);
+        container.appendChild(section);
+      });
+      
+      // 显示评估结果区
+      container.style.display = 'block';
+    }
+    
+    // 绘制图表函数（利用 Chart.js）
+    function drawCharts(results) {
+      // x轴指标
+      const labels = ["Accuracy", "Precision", "Recall", "FMeasure"];
+      const datasetsGroup1 = [];
+      const datasetsGroup2 = [];
+      
+      results.forEach(result => {
+        // 假定每个 result.data 数组中第一个字符串的数据使用制表符分隔，
+        // 前4个数字为指标组1，后4个为指标组2
+        let cells = result.data[0].split('\t').map(v => parseFloat(v));
+        let group1 = cells.slice(0, 4);
+        let group2 = cells.slice(4, 8);
+        
+        // 随机颜色生成函数
+        const randomColor = () => {
+          return 'rgba(' +
+                 Math.floor(Math.random()*256) + ',' +
+                 Math.floor(Math.random()*256) + ',' +
+                 Math.floor(Math.random()*256) + ',0.6)';
+        };
+        
+        datasetsGroup1.push({
+          label: result.method,
+          data: group1,
+          backgroundColor: randomColor(),
+          borderColor: 'black',
+          borderWidth: 1
+        });
+        datasetsGroup2.push({
+          label: result.method,
+          data: group2,
+          backgroundColor: randomColor(),
+          borderColor: 'black',
+          borderWidth: 1
+        });
+      });
+      
+      // 生成两个并排的 canvas
+      document.getElementById('chart_container').innerHTML = `
+        <div class="row">
+          <div class="col-md-6">
+            <canvas id="chart1"></canvas>
+          </div>
+          <div class="col-md-6">
+            <canvas id="chart2"></canvas>
+          </div>
+        </div>
+      `;
+      
+      // 绘制图表 1
+      const ctx1 = document.getElementById('chart1').getContext('2d');
+      new Chart(ctx1, {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: datasetsGroup1
+        },
+        options: {
+          plugins: {
+            title: {
+              display: true,
+              text: '训练集'
+            }
+          },
+          responsive: true,
+          scales: {
+            y: {
+              beginAtZero: true
+            }
+          }
+        }
+      });
+      
+      // 绘制图表 2
+      const ctx2 = document.getElementById('chart2').getContext('2d');
+      new Chart(ctx2, {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: datasetsGroup2
+        },
+        options: {
+          plugins: {
+            title: {
+              display: true,
+              text: '测试集'
+            }
+          },
+          responsive: true,
+          scales: {
+            y: {
+              beginAtZero: true
+            }
+          }
+        }
+      });
+      
+      // 显示图表区域
+      document.getElementById('chart_container').style.display = 'block';
+    }
+  </script>
+</head>
+<body>
+  <div class="container">
+    <h1 class="mb-4">运行 SQUARE 算法</h1>
+    
+    <div class="card mb-4">
+      <div class="card-body">
+        <div class="form-row">
+          <div class="form-group col-md-4">
+            <label for="estimation">估计方法:</label>
+            <select id="estimation" class="form-control">
+              <option value="supervised">supervised</option>
+              <option value="unsupervised">unsupervised</option>
+            </select>
+          </div>
+          <div class="form-group col-md-4">
+            <label for="dataset">数据集:</label>
+            <select id="dataset" class="form-control">
+              <option value="HCB">HCB</option>
+              <option value="HCBHCB3">HCBHCB3</option>
+            </select>
+          </div>
+          <div class="form-group col-md-4" id="nfold_container">
+            <label for="nfold">n-fold 值:</label>
+            <select id="nfold" class="form-control">
+              <option value="10">10</option>
+              <option value="5">5</option>
+              <option value="2">2</option>
+              <option value="-5">-5</option>
+              <option value="-10">-10</option>
+            </select>
+          </div>
+        </div>
+        <button onclick="runAlgorithm()" class="btn btn-primary">运行算法</button>
+      </div>
+    </div>
+    
+    <div class="card mb-4">
+      <div class="card-header">实时输出</div>
+      <div class="card-body">
+        <pre id="result"></pre>
+      </div>
+    </div>
+        <!-- 图表区域，默认隐藏 -->
+        <div class="card" id="chart_card" style="display: none;">
+          <div class="card-header">图表</div>
+          <div class="card-body" id="chart_container"></div>
+        </div>
+    <!-- 评估结果区域，默认隐藏 -->
+    <div class="card mb-4" id="evaluation_results_card" style="display: none;">
+      <div class="card-header">评估结果</div>
+      <div class="card-body" id="evaluation_results"></div>
+    </div>
+    
+
+  </div>
+  
+  <!-- 引入 Bootstrap JS 和依赖 -->
+  <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js"></script>
+  <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+</body>
+</html>

@@ -1,0 +1,1 @@
+--responses ./data/HCB/responses.txt --category ./data/HCB/categories.txt --groundTruth ./data/HCB/groundTruth.txt --method All --nfold -10 --estimation supervised --saveDir ./nFoldSets/HCB/supervised/nFoldSet_10.0/
