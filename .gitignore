@@ -1,1 +1,5 @@
 venv
+nFoldSets
+logs/*
+square-2.0
+*.txt
