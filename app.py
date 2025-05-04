@@ -111,7 +111,15 @@ def run_java_algorithm_stream():
     estimation = data.get('estimation', 'supervised')
     dataset = data.get('dataset', 'HCB')
     nfold = data.get('nfold', 10)
-    method=data.get('method', 'All') #Majority,Raykar,Bayes,Zen
+    method = data.get('method', 'All') # Majority,Raykar,Bayes,Zen
+    
+    print(f"运行算法参数：estimation={estimation}, dataset={dataset}, nfold={nfold}, method={method}")
+
+    # 确保目录存在
+    if not os.path.exists('./data'):
+        os.makedirs('./data', exist_ok=True)
+    if not os.path.exists(f'./data/{dataset}'):
+        os.makedirs(f'./data/{dataset}', exist_ok=True)
 
     # 根据监督方式构造配置文件及保存目录
     if estimation == "supervised":
@@ -121,6 +129,9 @@ def run_java_algorithm_stream():
             supervision_percentage = 100 - (100 / abs(nfold))
         folder_name = "nFoldSet_" + str(supervision_percentage)
         saveDir = f"./nFoldSets/{dataset}/{method}/{estimation}/{folder_name}/"
+        # 确保目录存在
+        os.makedirs(saveDir, exist_ok=True)
+        
         text_content = (
             f"--responses ./data/{dataset}/responses.txt "
             f"--category ./data/{dataset}/categories.txt "
@@ -128,34 +139,26 @@ def run_java_algorithm_stream():
             f"--method {method} --nfold -{nfold} "
             f"--estimation {estimation} --saveDir {saveDir}"
         )
-        text_file_name = f"genNFold{nfold}_{dataset}_{estimation}_CLA.txt"
+        text_file_name = f"genNFold{nfold}_{dataset}_{estimation}_{method}_CLA.txt"
     else:
         saveDir = f"./nFoldSets/{dataset}/{method}/{estimation}/"
+        # 确保目录存在
+        os.makedirs(saveDir, exist_ok=True)
+        
         text_content = (
             f"--responses ./data/{dataset}/responses.txt "
             f"--category ./data/{dataset}/categories.txt "
             f"--groundTruth ./data/{dataset}/groundTruth.txt "
             f"--method {method} --estimation {estimation} --saveDir {saveDir}"
-            
         )
-        text_file_name = f"gen_{dataset}_{estimation}_CLA.txt"
+        text_file_name = f"gen_{dataset}_{estimation}_{method}_CLA.txt"
 
     # 将配置内容写入文件
     with open(text_file_name, "w", encoding="utf-8") as file:
         file.write(text_content)
     print(f"内容已写入 {text_file_name}")
 
-    # # 构造 Java 命令，注意根据你的 jar 路径调整
-    # cmd = [
-    #     'java',
-    #     '-Xmx2048m',
-    #     '-ea',
-    #     '-cp',
-    #     './algorithm/jblas-1.2.4.jar:./algorithm/log4j-core-2.4.jar:./algorithm/log4j-api-2.4.jar:./algorithm/qa-2.0.jar',
-    #     'org.square.qa.analysis.Main',
-    #     '--file',
-    #     text_file_name
-    # ]
+    # 构造 Java 命令
     sep = ';' if platform.system() == 'Windows' else ':'
 
     classpath = sep.join([
@@ -176,14 +179,24 @@ def run_java_algorithm_stream():
         text_file_name
     ]
     
+    print(f"执行命令: {' '.join(cmd)}")
+    
     def generate():
         # 启动 Java 进程，并实时输出日志
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
-        for line in iter(process.stdout.readline, ''):
-            yield f"data: {line}\n\n"
-        process.stdout.close()
-        return_code = process.wait()
-        yield f"data: Process finished with return code {return_code}\n\n"
+        try:
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            for line in iter(process.stdout.readline, ''):
+                print(f"Java输出: {line.strip()}")
+                yield f"data: {line}\n\n"
+            process.stdout.close()
+            return_code = process.wait()
+            print(f"进程结束，返回码: {return_code}")
+            yield f"data: Process finished with return code {return_code}\n\n"
+        except Exception as e:
+            error_msg = f"启动进程时出错: {str(e)}"
+            print(error_msg)
+            yield f"data: ERROR: {error_msg}\n\n"
+            yield f"data: Process finished with return code -1\n\n"
     
     return Response(generate(), mimetype='text/event-stream')
 
@@ -200,7 +213,8 @@ def get_evaluation_results():
     dataset = data.get('dataset', 'HCB')
     nfold = data.get('nfold', 10)
     method = data.get('method', 'All')
-    print(f"estimation: {estimation}, dataset: {dataset}, nfold: {nfold}, method: {method}")
+    print(f"评估参数：estimation={estimation}, dataset={dataset}, nfold={nfold}, method={method}")
+    
     # 构造结果文件夹路径
     if estimation == "supervised":
         if nfold > 0:
@@ -208,39 +222,72 @@ def get_evaluation_results():
         else:
             supervision_percentage = 100 - (100 / abs(nfold))
         results_folder = f"./nFoldSets/{dataset}/{method}/{estimation}/nFoldSet_{supervision_percentage}/results/nFold"
-        print(f"results_folder: {results_folder}")
+        print(f"结果文件夹路径: {results_folder}")
     else:
         results_folder = f"./nFoldSets/{dataset}/{method}/{estimation}/results/nFold"
-        print(f"results_folder: {results_folder}")
+        print(f"结果文件夹路径: {results_folder}")
+    
+    # 检查结果文件夹是否存在
+    if not os.path.exists(results_folder):
+        # 尝试查找其他可能的路径
+        alternative_folders = [
+            f"./nFoldSets/{dataset}/{estimation}/nFoldSet_{supervision_percentage if 'supervision_percentage' in locals() else ''}/results/nFold",
+            f"./nFoldSets/{dataset}/{estimation}/results/nFold",
+            f"./nFoldSets/{dataset}/All/{estimation}/nFoldSet_{supervision_percentage if 'supervision_percentage' in locals() else ''}/results/nFold",
+            f"./nFoldSets/{dataset}/All/{estimation}/results/nFold"
+        ]
+        
+        for alt_folder in alternative_folders:
+            print(f"尝试替代路径: {alt_folder}")
+            if os.path.exists(alt_folder):
+                results_folder = alt_folder
+                print(f"找到替代路径: {results_folder}")
+                break
+        else:
+            print(f"错误：结果文件夹 {results_folder} 不存在，且未找到替代路径")
+            return jsonify({"error": f"结果文件夹不存在: {results_folder}。请确保算法已成功运行。"}), 404
     
     results = []
-    if os.path.exists(results_folder):
-        for filename in os.listdir(results_folder):
+    try:
+        files = os.listdir(results_folder)
+        print(f"文件夹 {results_folder} 中的文件: {files}")
+        
+        for filename in files:
             if filename.endswith('.txt'):
                 # 提取文件名中评分方法部分（例如 "Majority_unsupervised_results.txt" 提取 "Majority"）
-                method = filename.split('_')[0]
+                method_name = filename.split('_')[0]
                 file_path = os.path.join(results_folder, filename)
                 try:
                     with open(file_path, "r", encoding="utf-8") as f:
-                        lines = [line.strip() for line in f if line.strip()]
+                        content = f.read()
+                        lines = [line.strip() for line in content.splitlines() if line.strip()]
                         # 分别获取以 "%" 开头的 header 行和其它数据行
                         headers = [line for line in lines if line.startswith('%')]
                         data_lines = [line for line in lines if not line.startswith('%')]
+                    
+                    print(f"文件 {filename} 读取成功，header行数: {len(headers)}, 数据行数: {len(data_lines)}")
                     results.append({
-                        "method": method,
+                        "method": method_name,
                         "filename": filename,
                         "headers": headers,
                         "data": data_lines
                     })
                 except Exception as e:
+                    print(f"读取文件 {filename} 时出错: {str(e)}")
                     results.append({
-                        "method": method,
+                        "method": method_name,
                         "filename": filename,
                         "error": str(e)
                     })
+        
+        if not results:
+            print(f"警告：文件夹 {results_folder} 中没有找到任何 .txt 文件")
+            return jsonify({"warning": f"文件夹 {results_folder} 中没有找到任何结果文件"}), 200
+        
         return jsonify({"results": results})
-    else:
-        return jsonify({"error": f"Results folder {results_folder} does not exist"}), 404
+    except Exception as e:
+        print(f"处理结果时出错: {str(e)}")
+        return jsonify({"error": f"处理结果时出错: {str(e)}"}), 500
 
 if __name__ == '__main__':
     app.run(debug=True)

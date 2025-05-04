@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <title>SQUARE算法运行</title>
-  <!-- 引入 Bootstrap CSS -->
-  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
-  <!-- 引入 Chart.js CDN -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- 使用国内 BootCDN 替换 Bootstrap CSS -->
+  <link rel="stylesheet" href="https://cdn.bootcdn.net/ajax/libs/twitter-bootstrap/4.5.2/css/bootstrap.min.css">
+  <!-- 使用国内 BootCDN 替换 Chart.js -->
+  <script src="https://cdn.bootcdn.net/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
   <style>
     body {
       background-color: #f8f9fa;
@@ -130,18 +130,41 @@
     
     // 获取评估结果，并展示表格和图表
     function getEvaluationResults(params) {
+      console.log("发送获取评估结果请求，参数：", params);
       fetch('/get_evaluation_results', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(params)
       })
-      .then(response => response.json())
+      .then(response => {
+        console.log("获取评估结果响应状态：", response.status);
+        return response.json();
+      })
       .then(result => {
-         displayEvaluationResults(result.results);
-         drawCharts(result.results);
+        console.log("获取评估结果数据：", result);
+        if (result.error) {
+          console.error("获取评估结果错误：", result.error);
+          // 显示错误信息在页面上
+          document.getElementById('evaluation_results').innerHTML = 
+            `<div class="alert alert-danger">获取结果失败: ${result.error}</div>`;
+          document.getElementById('evaluation_results').style.display = 'block';
+          return;
+        }
+        if (!result.results || result.results.length === 0) {
+          console.warn("结果为空");
+          document.getElementById('evaluation_results').innerHTML = 
+            '<div class="alert alert-warning">没有找到评估结果数据</div>';
+          document.getElementById('evaluation_results').style.display = 'block';
+          return;
+        }
+        displayEvaluationResults(result.results);
+        drawCharts(result.results);
       })
       .catch(error => {
-         console.error("获取评估结果失败:", error);
+        console.error("获取评估结果失败:", error);
+        document.getElementById('evaluation_results').innerHTML = 
+          `<div class="alert alert-danger">获取结果失败: ${error.message}</div>`;
+        document.getElementById('evaluation_results').style.display = 'block';
       });
     }
     
@@ -433,8 +456,8 @@
 
   </div>
   
-  <!-- 引入 jQuery 和 Bootstrap JS -->
-  <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.5.2/dist/js/bootstrap.bundle.min.js"></script>
+  <!-- 使用国内 BootCDN 替换 jQuery 和 Bootstrap JS -->
+  <script src="https://cdn.bootcdn.net/ajax/libs/jquery/3.5.1/jquery.slim.min.js"></script>
+  <script src="https://cdn.bootcdn.net/ajax/libs/twitter-bootstrap/4.5.2/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
